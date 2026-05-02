@@ -1,10 +1,24 @@
 package id.ac.ui.cs.advprog.bidmart.backend.auth.controller;
 
+import id.ac.ui.cs.advprog.bidmart.backend.auth.dto.InternalCreateUserRequestDTO;
+import id.ac.ui.cs.advprog.bidmart.backend.auth.dto.InternalUpdateUserRequestDTO;
+import id.ac.ui.cs.advprog.bidmart.backend.auth.dto.InternalUpdateUserRolesRequestDTO;
+import id.ac.ui.cs.advprog.bidmart.backend.auth.dto.InternalUpdateUserStatusRequestDTO;
+import id.ac.ui.cs.advprog.bidmart.backend.auth.dto.InternalUserResponseDTO;
 import id.ac.ui.cs.advprog.bidmart.backend.auth.entity.User;
 import id.ac.ui.cs.advprog.bidmart.backend.auth.entity.UserStatus;
 import id.ac.ui.cs.advprog.bidmart.backend.auth.service.AuthService;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -21,36 +35,55 @@ public class InternalUserController {
         this.authService = authService;
     }
 
+    @GetMapping
+    public ResponseEntity<List<InternalUserResponseDTO>> getAllUsers() {
+        List<InternalUserResponseDTO> users = authService.getAllUsers().stream()
+                .map(this::toInternalUserResponse)
+                .toList();
+
+        return ResponseEntity.ok(users);
+    }
+
+    @PostMapping
+    public ResponseEntity<InternalUserResponseDTO> createUser(@RequestBody InternalCreateUserRequestDTO req) {
+        User user = authService.createInternalUser(req);
+        return ResponseEntity.status(201).body(toInternalUserResponse(user));
+    }
+
     @GetMapping("/{userId}/validate")
     public ResponseEntity<Map<String, Object>> validateUser(@PathVariable UUID userId) {
         User user = authService.getUserById(userId);
 
         Map<String, Object> body = new LinkedHashMap<>();
+        body.put("valid", user.getStatus() != UserStatus.SUSPENDED);
+        body.put("userId", user.getId());
+        body.put("status", safeStatus(user));
 
         if (user.getStatus() == UserStatus.SUSPENDED) {
-            body.put("valid", false);
-            body.put("userId", user.getId());
-            body.put("status", safeStatus(user));
             body.put("message", "User ini telah di-suspend.");
             return ResponseEntity.status(403).body(body);
         }
 
-        body.put("valid", true);
-        body.put("userId", user.getId());
-        body.put("status", safeStatus(user));
         return ResponseEntity.ok(body);
     }
 
     @GetMapping("/{userId}")
-    public ResponseEntity<Map<String, Object>> getUserById(@PathVariable UUID userId) {
+    public ResponseEntity<InternalUserResponseDTO> getUserById(@PathVariable UUID userId) {
         User user = authService.getUserById(userId);
-        return ResponseEntity.ok(toInternalUserMap(user));
+        return ResponseEntity.ok(toInternalUserResponse(user));
     }
 
     @GetMapping("/by-email")
-    public ResponseEntity<Map<String, Object>> getUserByEmail(@RequestParam String email) {
+    public ResponseEntity<InternalUserResponseDTO> getUserByEmail(@RequestParam String email) {
         User user = authService.getUserByEmail(email);
-        return ResponseEntity.ok(toInternalUserMap(user));
+        return ResponseEntity.ok(toInternalUserResponse(user));
+    }
+
+    @PutMapping("/{userId}")
+    public ResponseEntity<InternalUserResponseDTO> updateUser(@PathVariable UUID userId,
+                                                              @RequestBody InternalUpdateUserRequestDTO req) {
+        User user = authService.updateInternalUser(userId, req);
+        return ResponseEntity.ok(toInternalUserResponse(user));
     }
 
     @GetMapping("/{userId}/roles")
@@ -62,6 +95,17 @@ public class InternalUserController {
         body.put("roles", safeRoles(user));
 
         return ResponseEntity.ok(body);
+    }
+
+    @PatchMapping("/{userId}/roles")
+    public ResponseEntity<Map<String, Object>> updateUserRoles(@PathVariable UUID userId,
+                                                               @RequestBody InternalUpdateUserRolesRequestDTO req) {
+        User user = authService.updateInternalUserRoles(userId, req);
+
+        return ResponseEntity.ok(Map.of(
+                "userId", user.getId(),
+                "roles", safeRoles(user)
+        ));
     }
 
     @GetMapping("/{userId}/status")
@@ -76,20 +120,35 @@ public class InternalUserController {
         return ResponseEntity.ok(body);
     }
 
-    private Map<String, Object> toInternalUserMap(User user) {
-        Map<String, Object> body = new LinkedHashMap<>();
+    @PatchMapping("/{userId}/status")
+    public ResponseEntity<Map<String, Object>> updateUserStatus(@PathVariable UUID userId,
+                                                                @RequestBody InternalUpdateUserStatusRequestDTO req) {
+        User user = authService.updateInternalUserStatus(userId, req);
 
-        body.put("id", user.getId());
-        body.put("email", user.getEmail());
-        body.put("displayName", user.getDisplayName() != null ? user.getDisplayName() : "Pengguna Baru");
-        body.put("avatarUrl", user.getAvatarUrl() != null ? user.getAvatarUrl() : "");
-        body.put("emailVerified", user.isEmailVerified());
-        body.put("roles", safeRoles(user));
-        body.put("status", safeStatus(user));
-        body.put("createdAt", user.getCreatedAt());
-        body.put("updatedAt", user.getUpdatedAt());
+        return ResponseEntity.ok(Map.of(
+                "userId", user.getId(),
+                "status", safeStatus(user)
+        ));
+    }
 
-        return body;
+    @DeleteMapping("/{userId}")
+    public ResponseEntity<Map<String, String>> deleteUser(@PathVariable UUID userId) {
+        authService.deleteInternalUser(userId);
+        return ResponseEntity.ok(Map.of("message", "User berhasil dihapus."));
+    }
+
+    private InternalUserResponseDTO toInternalUserResponse(User user) {
+        return new InternalUserResponseDTO(
+                user.getId(),
+                user.getEmail(),
+                user.getDisplayName() != null ? user.getDisplayName() : "Pengguna Baru",
+                user.getAvatarUrl() != null ? user.getAvatarUrl() : "",
+                user.isEmailVerified(),
+                safeRoles(user),
+                safeStatus(user),
+                user.getCreatedAt(),
+                user.getUpdatedAt()
+        );
     }
 
     private List<String> safeRoles(User user) {

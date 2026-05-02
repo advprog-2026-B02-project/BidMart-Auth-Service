@@ -12,6 +12,11 @@ import id.ac.ui.cs.advprog.bidmart.backend.auth.dto.SessionResponseDTO;
 import id.ac.ui.cs.advprog.bidmart.backend.auth.dto.TwoFactorSetupResponseDTO;
 import id.ac.ui.cs.advprog.bidmart.backend.auth.dto.TwoFactorVerifyRequestDTO;
 import id.ac.ui.cs.advprog.bidmart.backend.auth.dto.UserResponseDTO;
+import id.ac.ui.cs.advprog.bidmart.backend.auth.dto.InternalCreateUserRequestDTO;
+import id.ac.ui.cs.advprog.bidmart.backend.auth.dto.InternalUpdateUserRequestDTO;
+import id.ac.ui.cs.advprog.bidmart.backend.auth.dto.InternalUpdateUserRolesRequestDTO;
+import id.ac.ui.cs.advprog.bidmart.backend.auth.dto.InternalUpdateUserStatusRequestDTO;
+
 import id.ac.ui.cs.advprog.bidmart.backend.auth.entity.PasswordResetToken;
 import id.ac.ui.cs.advprog.bidmart.backend.auth.entity.EmailVerificationToken;
 import id.ac.ui.cs.advprog.bidmart.backend.auth.entity.PartialAuthSession;
@@ -19,15 +24,18 @@ import id.ac.ui.cs.advprog.bidmart.backend.auth.entity.RefreshToken;
 import id.ac.ui.cs.advprog.bidmart.backend.auth.entity.Role;
 import id.ac.ui.cs.advprog.bidmart.backend.auth.entity.User;
 import id.ac.ui.cs.advprog.bidmart.backend.auth.entity.UserStatus;
+
 import id.ac.ui.cs.advprog.bidmart.backend.auth.repository.EmailVerificationTokenRepository;
 import id.ac.ui.cs.advprog.bidmart.backend.auth.repository.PartialAuthSessionRepository;
 import id.ac.ui.cs.advprog.bidmart.backend.auth.repository.PasswordResetTokenRepository;
 import id.ac.ui.cs.advprog.bidmart.backend.auth.repository.RefreshTokenRepository;
 import id.ac.ui.cs.advprog.bidmart.backend.auth.repository.RoleRepository;
 import id.ac.ui.cs.advprog.bidmart.backend.auth.repository.UserRepository;
+
 import id.ac.ui.cs.advprog.bidmart.backend.auth.security.JwtService;
 import id.ac.ui.cs.advprog.bidmart.backend.auth.config.AppProperties;
 import id.ac.ui.cs.advprog.bidmart.backend.auth.config.AuthProperties;
+
 import id.ac.ui.cs.advprog.bidmart.common.event.UserRoleChangedEvent;
 import id.ac.ui.cs.advprog.bidmart.common.event.UserSuspendedEvent;
 import jakarta.servlet.http.HttpServletRequest;
@@ -37,6 +45,7 @@ import org.springframework.context.ApplicationEvent;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
 
 import java.security.SecureRandom;
 import java.time.Instant;
@@ -635,11 +644,118 @@ public class AuthService {
 
     @Transactional(readOnly = true)
     public void validateUser(UUID userId) {
-        User user = users.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("ID tidak terdaftar di sistem."));
+        User user = getUserById(userId);
 
         if (user.getStatus() == UserStatus.SUSPENDED) {
             throw new IllegalStateException("User ini telah di-suspend.");
         }
+    }
+
+    @Transactional(readOnly = true)
+    public boolean isUserValid(UUID userId) {
+        return users.findById(userId)
+                .map(user -> user.getStatus() == UserStatus.ACTIVE)
+                .orElse(false);
+    }
+
+    @Transactional(readOnly = true)
+    public List<User> getAllUsers() {
+        return users.findAll();
+    }
+
+    @Transactional
+    public User createInternalUser(InternalCreateUserRequestDTO req) {
+        String email = req.email.toLowerCase().trim();
+
+        if (users.existsByEmail(email)) {
+            throw new IllegalArgumentException("Email sudah terdaftar.");
+        }
+
+        User user = new User();
+        user.setEmail(email);
+        user.setPasswordHash(passwordEncoder.encode(req.password));
+        user.setDisplayName(req.displayName);
+        user.setAvatarUrl(req.avatarUrl);
+        user.setEmailVerified(req.emailVerified != null ? req.emailVerified : false);
+
+        if (req.roles != null && !req.roles.isEmpty()) {
+            user.setRolesList(req.roles);
+        } else {
+            user.setRolesList(List.of("BUYER", "SELLER"));
+        }
+
+        if (req.status != null && !req.status.isBlank()) {
+            user.setStatus(UserStatus.valueOf(req.status.trim().toUpperCase(Locale.ROOT)));
+        } else {
+            user.setStatus(UserStatus.ACTIVE);
+        }
+
+        return users.save(user);
+    }
+
+    @Transactional
+    public User updateInternalUser(UUID userId, InternalUpdateUserRequestDTO req) {
+        User user = getUserById(userId);
+
+        if (req.email != null && !req.email.isBlank()) {
+            String email = req.email.toLowerCase().trim();
+
+            if (!email.equals(user.getEmail()) && users.existsByEmail(email)) {
+                throw new IllegalArgumentException("Email sudah terdaftar.");
+            }
+
+            user.setEmail(email);
+        }
+
+        if (req.displayName != null) {
+            user.setDisplayName(req.displayName);
+        }
+
+        if (req.avatarUrl != null) {
+            user.setAvatarUrl(req.avatarUrl);
+        }
+
+        if (req.emailVerified != null) {
+            user.setEmailVerified(req.emailVerified);
+        }
+
+        return users.save(user);
+    }
+
+    @Transactional
+    public User updateInternalUserStatus(UUID userId, InternalUpdateUserStatusRequestDTO req) {
+        User user = getUserById(userId);
+        UserStatus status = UserStatus.valueOf(req.status.trim().toUpperCase(Locale.ROOT));
+
+        user.setStatus(status);
+
+        if (status == UserStatus.SUSPENDED) {
+            refreshTokens.revokeAllByUser(user);
+            eventPublisher.publishEvent(new UserSuspendedEvent(user.getId(), "Internal service update", Instant.now()));
+        }
+
+        return users.save(user);
+    }
+
+    @Transactional
+    public User updateInternalUserRoles(UUID userId, InternalUpdateUserRolesRequestDTO req) {
+        User user = getUserById(userId);
+
+        if (req.roles == null || req.roles.isEmpty()) {
+            throw new IllegalArgumentException("Roles tidak boleh kosong.");
+        }
+
+        user.setRolesList(req.roles);
+        users.save(user);
+
+        eventPublisher.publishEvent(new UserRoleChangedEvent(user.getId(), user.getRolesList(), Instant.now()));
+
+        return user;
+    }
+
+    @Transactional
+    public void deleteInternalUser(UUID userId) {
+        User user = getUserById(userId);
+        users.delete(user);
     }
 }
