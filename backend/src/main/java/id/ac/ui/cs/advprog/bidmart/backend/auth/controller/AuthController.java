@@ -47,7 +47,19 @@ public class AuthController {
     @PostMapping("/verify-email")
     public ResponseEntity<Map<String, String>> verifyEmail(@Valid @RequestBody VerifyEmailRequestDTO req) {
         auth.verifyEmail(req.token);
-        return ResponseEntity.ok(Map.of("message", "Email verified"));
+        return ResponseEntity.ok(Map.of("message", "Email berhasil diverifikasi."));
+    }
+
+    @PostMapping("/forgot-password")
+    public ResponseEntity<Map<String, String>> forgotPassword(@RequestBody Map<String, String> req) {
+        auth.forgotPassword(req.get("email"));
+        return ResponseEntity.ok(Map.of("message", "Tautan reset kata sandi telah dikirim jika email terdaftar."));
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<Map<String, String>> resetPassword(@RequestBody Map<String, String> req) {
+        auth.resetPassword(req.get("token"), req.get("newPassword"));
+        return ResponseEntity.ok(Map.of("message", "Kata sandi berhasil diperbarui."));
     }
 
     @PostMapping("/login")
@@ -72,7 +84,7 @@ public class AuthController {
                                                                  Authentication authentication) {
         User user = getCurrentUser(authentication);
         auth.confirmTwoFactor(user, req.code);
-        return ResponseEntity.ok(Map.of("message", "2FA enabled"));
+        return ResponseEntity.ok(Map.of("message", "Autentikasi dua faktor berhasil diaktifkan."));
     }
 
     @DeleteMapping("/2fa")
@@ -80,7 +92,7 @@ public class AuthController {
                                                                  Authentication authentication) {
         User user = getCurrentUser(authentication);
         auth.disableTwoFactor(user, req.password);
-        return ResponseEntity.ok(Map.of("message", "2FA disabled"));
+        return ResponseEntity.ok(Map.of("message", "Autentikasi dua faktor berhasil dinonaktifkan."));
     }
 
     @PostMapping("/refresh")
@@ -103,14 +115,17 @@ public class AuthController {
 
     private User getCurrentUser(Authentication authentication) {
         if (authentication == null || authentication.getPrincipal() == null) {
-            throw new IllegalArgumentException("Unauthorized");
+            throw new IllegalArgumentException("Tidak terautentikasi.");
         }
+
         @SuppressWarnings("unchecked")
         Map<String, Object> principal = (Map<String, Object>) authentication.getPrincipal();
+
         Object email = principal.get("email");
         if (email == null) {
-            throw new IllegalArgumentException("Unauthorized");
+            throw new IllegalArgumentException("Tidak terautentikasi.");
         }
+
         return auth.getUserByEmail(email.toString());
     }
 

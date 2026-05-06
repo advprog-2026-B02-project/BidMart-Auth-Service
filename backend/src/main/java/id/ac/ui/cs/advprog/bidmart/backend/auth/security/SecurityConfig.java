@@ -44,7 +44,9 @@ public class SecurityConfig {
                         "/auth/refresh",
                         "/auth/refresh-v2",
                         "/auth/verify-email",
-                        "/auth/2fa/verify"
+                        "/auth/2fa/verify",
+                        "/auth/forgot-password",
+                        "/auth/reset-password"
                 ).permitAll()
 
                 .requestMatchers(HttpMethod.GET, "/auth/verify").permitAll()
