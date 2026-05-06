@@ -1,6 +1,7 @@
 package id.ac.ui.cs.advprog.bidmart.backend.auth.controller;
 
 import id.ac.ui.cs.advprog.bidmart.backend.auth.dto.UpdateProfileRequest;
+import id.ac.ui.cs.advprog.bidmart.backend.auth.dto.ChangePasswordRequestDTO;
 import id.ac.ui.cs.advprog.bidmart.backend.auth.entity.User;
 import id.ac.ui.cs.advprog.bidmart.backend.auth.service.AuthService;
 import org.junit.jupiter.api.Test;
@@ -82,6 +83,20 @@ class MeControllerTest {
         ResponseEntity<?> res = meController.me(auth);
 
         assertEquals(200, res.getStatusCode().value());
+    }
+
+    @Test
+    void meV2_Success() {
+        Authentication auth = authenticated("e");
+
+        User user = new User();
+        ReflectionTestUtils.setField(user, "id", UUID.randomUUID());
+        user.setEmail("e");
+        user.setDisplayName("D");
+
+        when(authService.getUserByEmail("e")).thenReturn(user);
+
+        assertEquals(200, meController.meV2(auth).getStatusCode().value());
     }
 
     @Test
@@ -176,5 +191,57 @@ class MeControllerTest {
 
         Map<String, Object> body = (Map<String, Object>) res.getBody();
         assertEquals("", body.get("avatarUrl"));
+    }
+
+    @Test
+    void updateProfileV2_SuccessAndChangePassword() {
+        Authentication auth = authenticated("e");
+
+        User user = new User();
+        user.setEmail("e");
+
+        User updated = new User();
+        updated.setEmail("e");
+        updated.setDisplayName("N");
+        updated.setAvatarUrl("U");
+
+        when(authService.getUserByEmail("e")).thenReturn(user);
+        when(authService.updateProfile(user, "N", "U")).thenReturn(updated);
+
+        UpdateProfileRequest req = new UpdateProfileRequest();
+        req.displayName = "N";
+        req.avatarUrl = "U";
+
+        assertEquals(200, meController.updateProfileV2(auth, req).getStatusCode().value());
+
+        User updatedNoAvatar = new User();
+        updatedNoAvatar.setEmail("e");
+        updatedNoAvatar.setDisplayName("N");
+        updatedNoAvatar.setAvatarUrl(null);
+        when(authService.updateProfile(user, "N", null)).thenReturn(updatedNoAvatar);
+        UpdateProfileRequest noAvatar = new UpdateProfileRequest();
+        noAvatar.displayName = "N";
+        noAvatar.avatarUrl = null;
+        Map<String, Object> noAvatarBody = (Map<String, Object>) meController.updateProfileV2(auth, noAvatar).getBody();
+        assertEquals("", noAvatarBody.get("avatarUrl"));
+
+        ChangePasswordRequestDTO password = new ChangePasswordRequestDTO();
+        password.currentPassword = "old-password";
+        password.newPassword = "new-password";
+        assertEquals("Password updated", meController.changePassword(auth, password).getBody().get("message"));
+        verify(authService).changePassword(user, password);
+    }
+
+    @Test
+    void currentUserRejectsMissingEmail() {
+        Authentication auth = mock(Authentication.class);
+        when(auth.isAuthenticated()).thenReturn(true);
+        when(auth.getPrincipal()).thenReturn(Map.of("userId", "1"));
+
+        try {
+            meController.me(auth);
+        } catch (IllegalArgumentException e) {
+            assertEquals("Unauthorized", e.getMessage());
+        }
     }
 }

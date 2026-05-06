@@ -11,4 +11,14 @@ class BackendApplicationTests {
         BackendApplication.main(new String[]{});
     }
 
+    @Test
+    void mainHonorsExistingSystemPropertyWhenLoadingDotenvDefaults() {
+        System.setProperty("APP_BASE_URL", "http://already-set");
+        try {
+            BackendApplication.main(new String[]{"--server.port=0"});
+        } finally {
+            System.clearProperty("APP_BASE_URL");
+        }
+    }
+
 }
